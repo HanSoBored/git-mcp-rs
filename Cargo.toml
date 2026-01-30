@@ -1,0 +1,13 @@
+[package]
+name = "git_mcp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+reqwest = { version = "0.13.1", default-features = false, features = ["json", "blocking", "native-tls"] }
+openssl = { version = "0.10", features = ["vendored"] }
+anyhow = "1.0.100"
+regex = "1.12.2"
+semver = "1.0.27"

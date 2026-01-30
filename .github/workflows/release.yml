@@ -1,0 +1,144 @@
+name: Release & Publish
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag_exists: ${{ steps.check_tag.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get version
+        id: get_version
+        run: |
+          VERSION=$(grep "^version" Cargo.toml | head -n 1 | awk -F '"' '{print $2}')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      - name: Check Tag
+        id: check_tag
+        run: |
+          git fetch --tags
+          if git rev-parse "v${{ steps.get_version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-binaries:
+    needs: check-version
+    if: needs.check-version.outputs.tag_exists == 'false'
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- LINUX ---
+          # Standard Server/Desktop
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset_name: git-mcp-rs-linux-x86_64
+            use_cross: true
+
+          # ARM64 (Raspberry Pi 4, AWS Graviton, Android Termux)
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            asset_name: git-mcp-rs-linux-aarch64
+            use_cross: true
+
+          # ARMv7 (Raspberry Pi 2/3, Older IoT)
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            asset_name: git-mcp-rs-linux-armv7
+            use_cross: true
+          
+          # --- MACOS ---
+          # Apple Silicon (M1/M2/M3)
+          - os: macos-latest 
+            target: aarch64-apple-darwin
+            asset_name: git-mcp-rs-darwin-aarch64
+            use_cross: false
+          
+          # Intel Mac
+          - os: macos-latest 
+            target: x86_64-apple-darwin
+            asset_name: git-mcp-rs-darwin-x86_64
+            use_cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Cross
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build Binary
+        run: |
+          if [ "${{ matrix.use_cross }}" == "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Prepare Asset
+        shell: bash
+        run: |
+          cp target/${{ matrix.target }}/release/git_mcp ${{ matrix.asset_name }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+
+  create-release:
+    needs: [check-version, build-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+
+      - name: Generate Changelog
+        uses: orhun/git-cliff-action@v4
+        id: git_cliff
+        with:
+          config: .github/external/cliff.toml
+          args: --verbose --tag v${{ needs.check-version.outputs.version }} --strip header
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: Release v${{ needs.check-version.outputs.version }}
+          body: ${{ steps.git_cliff.outputs.content }}
+          files: |
+            git-mcp-rs-linux-x86_64
+            git-mcp-rs-linux-aarch64
+            git-mcp-rs-linux-armv7
+            git-mcp-rs-darwin-aarch64
+            git-mcp-rs-darwin-x86_64
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
