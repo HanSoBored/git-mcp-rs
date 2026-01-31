@@ -114,8 +114,8 @@ If you have Rust/Cargo installed:
 git clone https://github.com/HanSoBored/git-mcp-rs.git
 cd git-mcp-rs
 ./build.sh
-*The `build.sh` script compiles the release and moves it to `/usr/local/bin/` automatically.*
 ```
+*The `build.sh` script compiles the release and moves it to `/usr/local/bin/` automatically.*
 
 ---
 
